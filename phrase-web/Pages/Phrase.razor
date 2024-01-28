@@ -1,51 +1,80 @@
 ﻿@page "/Phrase"
+@using System.Text.Json
 @using phrase_web.Models
 @inject HttpClient Http
 @inject IConfiguration Configuration
 
 <h3>Phrase</h3>
 
-<div class="form-group">
-    <label for="dropdown">Select Option:</label>
-    <select id="dropdown" class="form-control" @bind="selectedOption" >
-        @foreach (var part in parts)
-        {
-            <option value="@part">@part</option>
-        }
-    </select>
-</div>
+<ul class="nav nav-tabs" id="myTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="word-tab" data-bs-toggle="tab" data-bs-target="#word-tab-pane" type="button" role="tab" aria-controls="word-tab-pane" aria-selected="true">Words</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="phrase-tab" data-bs-toggle="tab" data-bs-target="#phrase-tab-pane" type="button" role="tab" aria-controls="phrase-tab-pane" aria-selected="false">Phrases</button>
+    </li>
+</ul>
+<div class="tab-content" id="TabContent">
+    <div class="tab-pane fade show active" id="word-tab-pane" role="tabpanel" aria-labelledby="word-tab" tabindex="0">
+        <div class="form-group">
+            <label for="dropdown">Select Option:</label>
+            <select id="dropdown" class="form-control" @bind="selectedOption">
+                @foreach (var part in parts)
+                {
+                    <option value="@part">@part</option>
+                }
+            </select>
+        </div>
 
-<div class="form-group">
-    <label for="textBox">Enter Text:</label>
-     <input type="text" class="form-control" id="textBox" @bind="enteredText" @oninput="SearchEntered"/>
-    <div class="list-group">
-        @foreach (var part in searchResults)
-        {
-            <button type="button" class="list-group-item list-group-item-action" @onclick="(e => AddWord(e, part))">
-                @part
-            </button>
-        }
+        <div class="form-group">
+            <label for="tagList">Word List:</label>
+            <ul class="nav nav-pills">
+                @{
+                    for (var i = 0; i < tags.Count; i++)
+                    {
+                        var j = i;
+
+                        <li class="nav-item" style="padding-right:10px">
+                            <span class="nav-link active">
+                                @tags[i]
+                                <button type="button" class="btn btn-secondary btn-xs close" id="@i" aria-label="Close" @onclick="() => RemoveWord(j)">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </span>
+                        </li>
+                    }
+                }
+            </ul>
+            <div type="button-group">
+                <button type="button" class="btn btn-primary" @onclick="Submit">Submit</button>
+                <button type="button" class="btn btn-secondary" @onclick="() => tags.Clear()">Clear</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="textBox">Enter Text:</label>
+            <input type="text" class="form-control" id="textBox" @bind="enteredText" @oninput="SearchEntered" />
+            <div class="list-group">
+                @foreach (var part in searchResults)
+                {
+                    <button type="button" class="list-group-item list-group-item-action" @onclick="(e => AddWord(e, part))">
+                        @part
+                    </button>
+                }
+            </div>
+        </div>
     </div>
-</div>
-
-<div class="form-group">
-    <label for="tagList">Word List:</label>
-    <ul class="nav nav-pills">
-        @{
-            for (var i = 0; i < tags.Count; i++)
-            {
-                var j = i;
-                
-                    <li class="nav-item" style="padding-right:10px">
-                        <span class="nav-link active">@tags[i]                        
-                        <button type="button" class="btn btn-secondary btn-xs close" id="@i" aria-label="Close" @onclick="() => RemoveWord(j)">
-                            <span aria-hidden="true">&times;</span>
-                        </button>
-                    </span>
-                    </li>
-            }
-        }
-    </ul>
+    <div class="tab-pane fade" id="phrase-tab-pane" role="tabpanel" aria-labelledby="phrase-tab" tabindex="0">
+        <div class="form-group">
+            <label for="textBox">Phrases:</label>
+            <ul class="list-group">
+                @foreach (var phrase in phraseResults)
+                {
+                    <li class="list-group-item">@phrase.Text</li>
+                }
+            </ul>
+        </div>
+    </div>
 </div>
 
 @code {
@@ -54,31 +83,68 @@
     private List<string> tags { get; set; } = new List<string>();
     private List<string> parts { get; set; } = new List<string>();
     private List<string> searchResults { get; set; } = new List<string>();
-    private string apiPath { get; set; } = "";
+    private List<PhraseResult> phraseResults { get; set; } = new List<PhraseResult>();
+    private string wordApiPath { get; set; } = "";
+    private string phraseApiPath { get; set; } = "";
 
     protected override async Task OnInitializedAsync()
     {
-        apiPath = Configuration["PhraseApi:Endpoint"] ?? "";
-        var partsResults = await Http.GetAsync(apiPath);
+        var uri = Configuration["PhraseApi:uri"] ?? "";
+        var wordEndpoint = Configuration["PhraseApi:WordsEndpoint"] ?? "";
+        var phraseEndpoint = Configuration["PhraseApi:PhrasesEndpoint"] ?? "";
+        wordApiPath = $"{uri}{wordEndpoint}";
+        phraseApiPath = $"{uri}{phraseEndpoint}";
+        var partsResults = await Http.GetAsync(wordApiPath);
         var toClean = partsResults.Content.ReadAsStringAsync().Result.TrimStart('[').TrimEnd(']').Split(',').ToList();
         foreach (var part in toClean)
         {
             parts.Add(part.Trim('\"').ToLower());
         };
         selectedOption = parts[0];
+        phraseResults = await GetPhrase();
     }
 
-    private async Task AddWord(MouseEventArgs eventArgs, string word)
+    private Task AddWord(MouseEventArgs eventArgs, string word)
     {
         tags.Add(word);
         enteredText = "";
         searchResults = new List<string>();
+        return Task.CompletedTask;
+    }
+
+    private async Task Submit()
+    {
+        var response = await Http.PostAsJsonAsync(phraseApiPath, string.Join(" ", tags));
+        var result = await response.Content.ReadAsStringAsync();
+        tags.Clear();
+        phraseResults = await GetPhrase();
+    }
+
+    private async Task<List<PhraseResult>> GetPhrase()
+    {
+        var response = await Http.GetAsync(phraseApiPath);
+
+        if (response.IsSuccessStatusCode)
+        {
+            // Read the response content as a string
+            var jsonString = await response.Content.ReadAsStringAsync();
+
+            // Deserialize the JSON string to the RootObject class
+            var data = JsonSerializer.Deserialize<List<PhraseResult>>(jsonString);
+
+            return data;
+        }
+        else
+        {
+            // Return an empty list if the response is not successful
+            return new List<PhraseResult>();
+        }
     }
 
     private async Task SearchEntered(ChangeEventArgs searchRequest)
     {
         var data = new List<string>();
-        var response = await Http.GetAsync($"{apiPath}{selectedOption}/{searchRequest.Value}");
+        var response = await Http.GetAsync($"{wordApiPath}{selectedOption}/{searchRequest.Value}");
         var toClean = response.Content.ReadAsStringAsync().Result.TrimStart('[').TrimEnd(']').Split(',').ToList();
         foreach (var part in toClean)
         {
@@ -87,5 +153,5 @@
         searchResults = data;
     }
 
-private void RemoveWord(int id) => tags.RemoveAt(id);
+    private void RemoveWord(int id) => tags.RemoveAt(id);
 }
