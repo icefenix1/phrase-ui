@@ -1,12 +1,13 @@
 ﻿@page "/Phrase"
+@using phrase_web.Models
 @inject HttpClient Http
+@inject IConfiguration Configuration
 
 <h3>Phrase</h3>
 
 <div class="form-group">
     <label for="dropdown">Select Option:</label>
-    <select id="dropdown" class="form-control" @bind="selectedOption">
-        <option value="">Select an option</option>
+    <select id="dropdown" class="form-control" @bind="selectedOption" >
         @foreach (var part in parts)
         {
             <option value="@part">@part</option>
@@ -16,76 +17,74 @@
 
 <div class="form-group">
     <label for="textBox">Enter Text:</label>
-    <AutoComplete bind-Value="enteredText"
-                  TItem="string"
-                  DataProvider="SearchEntered"
-                  PropertyName="CustomerName"
-                  Placeholder="Search for a word..."
-                  OnChanged="AddWord" />
+     <input type="text" class="form-control" id="textBox" @bind="enteredText" @oninput="SearchEntered"/>
+    <div class="list-group">
+        @foreach (var part in searchResults)
+        {
+            <button type="button" class="list-group-item list-group-item-action" @onclick="(e => AddWord(e, part))">
+                @part
+            </button>
+        }
+    </div>
 </div>
 
 <div class="form-group">
     <label for="tagList">Word List:</label>
-    <div>
+    <ul class="nav nav-pills">
         @{
             for (var i = 0; i < tags.Count; i++)
             {
                 var j = i;
-                <div class="card" style="width: fit-content;float: left">
-                    <div class="card-header">
-                        <button type="button" id="@i" class="close" aria-label="Close" @onclick="() => RemoveWord(j)">
+                
+                    <li class="nav-item" style="padding-right:10px">
+                        <span class="nav-link active">@tags[i]                        
+                        <button type="button" class="btn btn-secondary btn-xs close" id="@i" aria-label="Close" @onclick="() => RemoveWord(j)">
                             <span aria-hidden="true">&times;</span>
                         </button>
-                    </div>
-                    <div class="card-body">
-                        <p class="card-text">@tags[i]</p>
-                    </div>
-                </div>
+                    </span>
+                    </li>
             }
         }
-    </div>
-
+    </ul>
 </div>
 
 @code {
-    private string selectedOption { get; set; } = "Select an option";
+    private string selectedOption { get; set; } = "";
     private string enteredText { get; set; } = "";
     private List<string> tags { get; set; } = new List<string>();
     private List<string> parts { get; set; } = new List<string>();
     private List<string> searchResults { get; set; } = new List<string>();
+    private string apiPath { get; set; } = "";
 
     protected override async Task OnInitializedAsync()
     {
-        var partsResults = await Http.GetAsync("https://localhost:51968/api/Words");
+        apiPath = Configuration["PhraseApi:Endpoint"] ?? "";
+        var partsResults = await Http.GetAsync(apiPath);
         var toClean = partsResults.Content.ReadAsStringAsync().Result.TrimStart('[').TrimEnd(']').Split(',').ToList();
         foreach (var part in toClean)
         {
             parts.Add(part.Trim('\"').ToLower());
         };
+        selectedOption = parts[0];
     }
 
-    private void AddWord()
+    private async Task AddWord(MouseEventArgs eventArgs, string word)
     {
-        tags.Add(enteredText);
+        tags.Add(word);
         enteredText = "";
         searchResults = new List<string>();
     }
 
-    private async Task<AutoCompleteDataProviderResult<string>> SearchEntered(AutoCompleteDataProviderRequest<string> searchRequest)
+    private async Task SearchEntered(ChangeEventArgs searchRequest)
     {
         var data = new List<string>();
-        var sr = new AutoCompleteDataProviderResult<string>();
-        if (selectedOption != "Select an option")
+        var response = await Http.GetAsync($"{apiPath}{selectedOption}/{searchRequest.Value}");
+        var toClean = response.Content.ReadAsStringAsync().Result.TrimStart('[').TrimEnd(']').Split(',').ToList();
+        foreach (var part in toClean)
         {
-            
-            var response = await Http.GetAsync($"https://localhost:51968/api/Words/{selectedOption}/{searchRequest.Filter.Value}");
-            var toClean = response.Content.ReadAsStringAsync().Result.TrimStart('[').TrimEnd(']').Split(',').ToList();
-            foreach (var part in toClean)
-            {
-                data.Add(part.Trim('\"').ToLower());
-            };
-        }
-        return new AutoCompleteDataProviderResult<string> { Data = data, TotalCount = data.Count() };
+            data.Add(part.Trim('\"').ToLower());
+        };
+        searchResults = data;
     }
 
 private void RemoveWord(int id) => tags.RemoveAt(id);
